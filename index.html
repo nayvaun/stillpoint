@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Stillpoint Journal</title>
+    <link rel="stylesheet" href="styles.css?v=topbar" />
+  </head>
+  <body>
+    <main class="site-shell">
+      <header class="home-header">
+        <button class="brand-button" id="homeButton" type="button" aria-label="Stillpoint home">
+          <p id="todayLabel"></p>
+          <h1>Stillpoint</h1>
+        </button>
+        <nav class="site-tabs" aria-label="Site sections">
+          <button class="site-tab" type="button" data-section="journal">Journal</button>
+          <button class="site-tab" type="button" data-section="letters">Letters</button>
+          <button class="site-tab" type="button" data-section="reading">Reading</button>
+        </nav>
+      </header>
+
+      <section class="section-panel home-landing active" id="homeSection" aria-label="Home">
+        <div class="home-landing__inner">
+          <p>Stillpoint</p>
+          <h2>A quiet place to keep what matters.</h2>
+          <div class="home-tab-grid" aria-label="Site sections">
+            <button type="button" data-section="journal">
+              <span>Journal</span>
+              <small>Entries and private notebooks</small>
+            </button>
+            <button type="button" data-section="letters">
+              <span>Letters</span>
+              <small>Reserved for correspondence</small>
+            </button>
+            <button type="button" data-section="reading">
+              <span>Reading</span>
+              <small>Reserved for notes and references</small>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section class="section-panel" id="journalSection" aria-label="Journal">
+        <aside class="journal-home" aria-label="Journal home">
+          <div class="panel-heading">
+            <span>Journals</span>
+            <div class="heading-actions">
+              <button class="icon-button" id="newJournalButton" type="button" aria-label="Create journal" title="Create journal">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+              </button>
+              <button class="icon-button danger-icon" id="deleteJournalButton" type="button" aria-label="Delete journal" title="Delete journal">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 15h10l1-15" /></svg>
+              </button>
+            </div>
+          </div>
+
+          <form class="journal-create" id="journalCreateForm">
+            <input id="journalNameInput" type="text" maxlength="48" placeholder="New journal name" aria-label="New journal name" />
+            <button class="primary-button compact" type="submit">Create</button>
+          </form>
+
+          <div class="journal-list" id="journalList" aria-label="Your journals"></div>
+
+          <section class="stats-grid" aria-label="Selected journal stats">
+            <article>
+              <strong id="entryCount">0</strong>
+              <span>Entries</span>
+            </article>
+            <article>
+              <strong id="wordCount">0</strong>
+              <span>Words</span>
+            </article>
+          </section>
+        </aside>
+
+        <aside class="sidebar" aria-label="Entry navigation">
+          <div class="panel-heading">
+            <span id="activeJournalName">Journal</span>
+          </div>
+
+          <div class="toolbar-row">
+            <button class="primary-button" id="newEntryButton" type="button">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+              <span>New entry</span>
+            </button>
+            <button class="icon-button" id="exportButton" type="button" aria-label="Export journal" title="Export journal">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14" /></svg>
+            </button>
+          </div>
+
+          <label class="search-box">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 21-4.35-4.35M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" /></svg>
+            <input id="searchInput" type="search" placeholder="Search entries" autocomplete="off" />
+          </label>
+
+          <div class="entry-list" id="entryList" aria-label="Saved journal entries"></div>
+        </aside>
+
+        <section class="workspace" aria-label="Journal editor">
+          <form class="editor" id="journalForm">
+            <div class="entry-topbar">
+              <div class="entry-fields" aria-label="Entry details">
+                <label>
+                  <span>Name</span>
+                  <input id="entryTitle" type="text" maxlength="70" placeholder="Entry name" aria-label="Entry name" />
+                </label>
+                <label>
+                  <span>Date</span>
+                  <input id="entryDate" type="date" aria-label="Entry date" />
+                </label>
+                <label>
+                  <span>Tags</span>
+                  <input id="tagInput" type="text" placeholder="Tags" aria-label="Entry tags" />
+                </label>
+              </div>
+
+              <div class="entry-command-row">
+                <button class="ghost-button" id="deleteButton" type="button">Delete entry</button>
+                <button class="primary-button" type="submit">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z" /><path d="M17 21v-8H7v8M7 3v5h8" /></svg>
+                  <span>Save</span>
+                </button>
+              </div>
+            </div>
+
+            <textarea id="entryBody" placeholder="Write here." aria-label="Journal entry"></textarea>
+          </form>
+        </section>
+      </section>
+
+      <section class="section-panel placeholder-panel" id="lettersSection" aria-label="Letters">
+        <div>
+          <span>Letters</span>
+          <p>This section is reserved for another writing space.</p>
+        </div>
+      </section>
+
+      <section class="section-panel placeholder-panel" id="readingSection" aria-label="Reading">
+        <div>
+          <span>Reading</span>
+          <p>This section is reserved for future notes and references.</p>
+        </div>
+      </section>
+    </main>
+
+    <template id="journalTemplate">
+      <button class="journal-card" type="button">
+        <strong></strong>
+        <span></span>
+      </button>
+    </template>
+
+    <template id="entryTemplate">
+      <button class="entry-card" type="button">
+        <span class="entry-card__date"></span>
+        <strong></strong>
+        <span class="entry-card__meta"></span>
+      </button>
+    </template>
+
+    <script src="app.js"></script>
+  </body>
+</html>
