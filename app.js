@@ -36,6 +36,7 @@ const els = {
   entryTitle: document.querySelector("#entryTitle"),
   entryDate: document.querySelector("#entryDate"),
   entryBody: document.querySelector("#entryBody"),
+  entryPreview: document.querySelector("#entryPreview"),
   tagInput: document.querySelector("#tagInput"),
   deleteButton: document.querySelector("#deleteButton")
 };
@@ -94,6 +95,7 @@ function bindEvents() {
 
   els.deleteButton.addEventListener("click", deleteActiveEntry);
   els.searchInput.addEventListener("input", renderEntryList);
+  els.entryBody.addEventListener("input", updatePreview);
   els.exportButton.addEventListener("click", exportEntries);
 }
 
@@ -199,6 +201,7 @@ function selectEntry(id) {
   els.entryDate.value = entry.date || toInputDate(entry.updatedAt);
   els.entryBody.value = entry.body;
   els.tagInput.value = entry.tags.join(", ");
+  updatePreview();
   renderEntryList();
 }
 
@@ -401,6 +404,80 @@ function getEntryMeta(entry) {
   const words = countWords(entry.body);
   const tags = entry.tags.length ? ` - ${entry.tags.join(", ")}` : "";
   return `${words} ${words === 1 ? "word" : "words"}${tags}`;
+}
+
+function updatePreview() {
+  const html = renderMarkup(els.entryBody.value);
+  els.entryPreview.innerHTML = html || "<p class=\"preview-empty\">Formatted preview</p>";
+}
+
+function renderMarkup(text) {
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  const blocks = [];
+  let paragraph = [];
+  let bullets = [];
+
+  const flushParagraph = () => {
+    if (!paragraph.length) return;
+    blocks.push(`<p>${formatInline(paragraph.join(" "))}</p>`);
+    paragraph = [];
+  };
+
+  const flushBullets = () => {
+    if (!bullets.length) return;
+    blocks.push(`<ul>${bullets.map((item) => `<li>${formatInline(item)}</li>`).join("")}</ul>`);
+    bullets = [];
+  };
+
+  lines.forEach((line) => {
+    const trimmed = line.trim();
+
+    if (!trimmed) {
+      flushParagraph();
+      flushBullets();
+      return;
+    }
+
+    const heading = trimmed.match(/^(#{1,3})\s+(.+)$/);
+    const bullet = trimmed.match(/^-\s+(.+)$/);
+
+    if (heading) {
+      flushParagraph();
+      flushBullets();
+      const level = heading[1].length + 1;
+      blocks.push(`<h${level}>${formatInline(heading[2])}</h${level}>`);
+      return;
+    }
+
+    if (bullet) {
+      flushParagraph();
+      bullets.push(bullet[1]);
+      return;
+    }
+
+    flushBullets();
+    paragraph.push(trimmed);
+  });
+
+  flushParagraph();
+  flushBullets();
+  return blocks.join("");
+}
+
+function formatInline(value) {
+  return escapeHtml(value)
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*([^*]+)\*/g, "<em>$1</em>");
+}
+
+function escapeHtml(value) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
 
 function toInputDate(date) {
