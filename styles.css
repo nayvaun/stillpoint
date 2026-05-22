@@ -529,7 +529,7 @@ textarea::placeholder {
 
 textarea {
   flex: 1;
-  min-height: min(66vh, 680px);
+  min-height: min(42vh, 460px);
   resize: none;
   padding: 12px 0 22px;
   color: var(--ink);
@@ -548,6 +548,78 @@ textarea:focus,
 .entry-fields label:focus-within {
   border-color: var(--line-strong);
   box-shadow: 0 0 0 1px var(--line);
+}
+
+.markup-hint {
+  margin-top: -8px;
+  color: var(--dim);
+  font-size: 0.82rem;
+}
+
+.entry-preview {
+  min-height: 180px;
+  padding: 18px 0 0;
+  color: var(--ink);
+  border-top: 1px solid var(--line);
+  font-size: 1.08rem;
+  line-height: 1.7;
+}
+
+.entry-preview :first-child {
+  margin-top: 0;
+}
+
+.entry-preview p,
+.entry-preview ul,
+.entry-preview h2,
+.entry-preview h3,
+.entry-preview h4 {
+  margin: 0 0 14px;
+}
+
+.entry-preview h2,
+.entry-preview h3,
+.entry-preview h4 {
+  font-weight: 400;
+  line-height: 1.08;
+}
+
+.entry-preview h2 {
+  font-size: 1.8rem;
+}
+
+.entry-preview h3 {
+  font-size: 1.45rem;
+}
+
+.entry-preview h4 {
+  font-size: 1.22rem;
+}
+
+.entry-preview ul {
+  padding-left: 22px;
+}
+
+.entry-preview li + li {
+  margin-top: 6px;
+}
+
+.entry-preview strong {
+  color: #fffaf0;
+}
+
+.entry-preview em {
+  color: #ddd5c9;
+}
+
+.entry-preview a {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.preview-empty {
+  color: var(--dim);
 }
 
 .ghost-button {
