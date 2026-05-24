@@ -121,9 +121,16 @@
               </div>
             </div>
 
-            <textarea id="entryBody" placeholder="Write here." aria-label="Journal entry"></textarea>
-            <div class="markup-hint">Use - for bullets, *italic*, **bold**, # headings, and [links](https://example.com).</div>
-            <article class="entry-preview" id="entryPreview" aria-label="Formatted preview"></article>
+            <div
+              class="writing-surface"
+              id="entryBody"
+              contenteditable="true"
+              role="textbox"
+              aria-label="Journal entry"
+              aria-multiline="true"
+              data-placeholder="Write here."
+            ></div>
+            <div class="markup-hint">Shortcuts: # heading, - or 1. lists, > quote, **bold**, *italic*, `code`, and [links](https://example.com).</div>
           </form>
         </section>
       </section>
