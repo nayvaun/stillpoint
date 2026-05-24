@@ -93,6 +93,17 @@ svg {
   justify-content: flex-end;
 }
 
+.account-pill {
+  min-height: 40px;
+  max-width: 220px;
+  overflow: hidden;
+  padding: 10px 12px;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .site-tab {
   min-height: 40px;
   padding: 0 18px;
@@ -162,6 +173,60 @@ svg {
   color: var(--muted);
   font-size: 1.12rem;
   line-height: 1.55;
+}
+
+.auth-panel {
+  display: grid;
+  gap: 16px;
+  max-width: 620px;
+  margin: 0 auto;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+  text-align: left;
+}
+
+.auth-panel__copy {
+  display: grid;
+  gap: 6px;
+}
+
+.auth-panel__copy span {
+  color: var(--ink);
+  font-size: 1.12rem;
+}
+
+.auth-panel__copy p {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.auth-form {
+  display: grid;
+  gap: 10px;
+}
+
+.auth-form input {
+  min-height: 38px;
+  padding: 0 10px;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  outline: 0;
+  background: transparent;
+}
+
+.auth-form input:focus {
+  border-color: var(--line-strong);
+  box-shadow: 0 0 0 1px var(--line);
+}
+
+.auth-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.hidden {
+  display: none !important;
 }
 
 #journalSection {
@@ -538,6 +603,11 @@ textarea:focus,
   background: transparent;
 }
 
+.ghost-button.neutral {
+  color: var(--ink);
+  border-color: var(--line);
+}
+
 .entry-command-row .primary-button,
 .entry-command-row .ghost-button {
   width: auto;
@@ -584,6 +654,10 @@ textarea:focus,
 
   .site-tabs {
     justify-content: flex-start;
+  }
+
+  .account-pill {
+    max-width: 100%;
   }
 
   #journalSection {
