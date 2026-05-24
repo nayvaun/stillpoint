@@ -1,10 +1,17 @@
+const supabaseUrl = "https://bmtmlmpixhkhoyjcomrc.supabase.co";
+const supabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJtdG1sbXBpeGhraG95amNvbXJjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1ODYyNzQsImV4cCI6MjA5NTE2MjI3NH0.bI18cB6yluWHG_Rg4rvWR1t6w5k7ZFs5gVsMrOJ_QA0";
 const journalsKey = "stillpoint.journals.v1";
 const legacyEntriesKey = "stillpoint.entries.v1";
 
+const db = window.supabase?.createClient(supabaseUrl, supabaseAnonKey);
+
 const state = {
-  journals: loadJournals(),
+  journals: [],
   activeJournalId: null,
-  activeEntryId: null
+  activeEntryId: null,
+  user: null,
+  loading: false,
+  authMessage: ""
 };
 
 const els = {
@@ -18,6 +25,13 @@ const els = {
     letters: document.querySelector("#lettersSection"),
     reading: document.querySelector("#readingSection")
   },
+  accountPill: document.querySelector("#accountPill"),
+  authStatus: document.querySelector("#authStatus"),
+  authEmail: document.querySelector("#authEmail"),
+  authPassword: document.querySelector("#authPassword"),
+  signInButton: document.querySelector("#signInButton"),
+  signUpButton: document.querySelector("#signUpButton"),
+  signOutButton: document.querySelector("#signOutButton"),
   journalCreateForm: document.querySelector("#journalCreateForm"),
   journalNameInput: document.querySelector("#journalNameInput"),
   newJournalButton: document.querySelector("#newJournalButton"),
@@ -42,23 +56,30 @@ const els = {
 
 init();
 
-function init() {
+async function init() {
   els.todayLabel.textContent = new Intl.DateTimeFormat("en", {
     weekday: "long",
     month: "long",
     day: "numeric"
   }).format(new Date());
 
-  if (!state.journals.length) {
-    state.journals.push(createJournalRecord("Journal"));
-    persist();
+  bindEvents();
+
+  if (!db) {
+    setAuthStatus("Supabase could not load. Using this browser only.");
+    loadLocalData();
+    return;
   }
 
-  state.activeJournalId = state.journals[0].id;
-  ensureActiveEntry();
-  bindEvents();
-  render();
-  selectEntry(getActiveEntries()[0]?.id);
+  const { data } = await db.auth.getSession();
+  state.user = data.session?.user || null;
+
+  db.auth.onAuthStateChange(async (_event, session) => {
+    state.user = session?.user || null;
+    await loadData();
+  });
+
+  await loadData();
 }
 
 function bindEvents() {
@@ -68,24 +89,28 @@ function bindEvents() {
     button.addEventListener("click", () => showSection(button.dataset.section));
   });
 
+  els.signInButton.addEventListener("click", signIn);
+  els.signUpButton.addEventListener("click", signUp);
+  els.signOutButton.addEventListener("click", signOut);
+
   els.newJournalButton.addEventListener("click", () => {
     els.journalNameInput.focus();
   });
 
   els.deleteJournalButton.addEventListener("click", deleteActiveJournal);
 
-  els.journalCreateForm.addEventListener("submit", (event) => {
+  els.journalCreateForm.addEventListener("submit", async (event) => {
     event.preventDefault();
-    createJournal();
+    await createJournal();
   });
 
-  els.form.addEventListener("submit", (event) => {
+  els.form.addEventListener("submit", async (event) => {
     event.preventDefault();
-    saveActiveEntry();
+    await saveActiveEntry();
   });
 
-  els.newEntryButton.addEventListener("click", () => {
-    const draft = createDraft(true);
+  els.newEntryButton.addEventListener("click", async () => {
+    const draft = await createDraft(true);
     state.activeEntryId = draft.id;
     render();
     selectEntry(draft.id);
@@ -95,6 +120,168 @@ function bindEvents() {
   els.deleteButton.addEventListener("click", deleteActiveEntry);
   els.searchInput.addEventListener("input", renderEntryList);
   els.exportButton.addEventListener("click", exportEntries);
+}
+
+async function signIn() {
+  const email = els.authEmail.value.trim();
+  const password = els.authPassword.value;
+  if (!email || !password) {
+    setAuthStatus("Enter your email and password first.");
+    return;
+  }
+
+  setAuthStatus("Signing in...");
+  const { error } = await db.auth.signInWithPassword({ email, password });
+  if (error) {
+    setAuthStatus(error.message);
+    return;
+  }
+
+  els.authPassword.value = "";
+}
+
+async function signUp() {
+  const email = els.authEmail.value.trim();
+  const password = els.authPassword.value;
+  if (!email || !password) {
+    setAuthStatus("Enter an email and password to sign up.");
+    return;
+  }
+
+  setAuthStatus("Creating account...");
+  const { data, error } = await db.auth.signUp({ email, password });
+  if (error) {
+    setAuthStatus(error.message);
+    return;
+  }
+
+  els.authPassword.value = "";
+  if (!data.session) {
+    setAuthStatus("Check your email to confirm your account.");
+  }
+}
+
+async function signOut() {
+  setAuthStatus("Signing out...");
+  await db.auth.signOut();
+}
+
+async function loadData() {
+  if (state.user) {
+    await loadCloudData();
+  } else {
+    state.authMessage = "";
+    loadLocalData();
+  }
+  renderAuth();
+}
+
+function loadLocalData() {
+  state.journals = loadLocalJournals();
+  if (!state.journals.length) {
+    state.journals.push(createJournalRecord("Journal"));
+    persistLocal();
+  }
+
+  state.activeJournalId = state.journals[0].id;
+  ensureActiveEntry();
+  render();
+  selectEntry(getActiveEntries()[0]?.id);
+}
+
+async function loadCloudData() {
+  state.loading = true;
+  render();
+  setAuthStatus("Loading your journals...");
+
+  try {
+    let journals = await fetchCloudJournals();
+
+    if (!journals.length) {
+      const localJournals = loadLocalJournals().filter((journal) =>
+        journal.entries.some((entry) => entry.title || entry.body) || journal.name !== "Journal"
+      );
+
+      if (localJournals.length) {
+        journals = await importLocalJournals(localJournals);
+        setAuthStatus("Signed in. Your browser journals were imported.");
+      } else {
+        const journal = createJournalRecord("Journal");
+        await saveJournalToCloud(journal);
+        const entry = makeEntry();
+        journal.entries.unshift(entry);
+        await saveEntryToCloud(journal, entry);
+        journals = [journal];
+        setAuthStatus("Signed in. Your journals will sync here.");
+      }
+    } else {
+      setAuthStatus("Signed in. Your journals are synced.");
+    }
+
+    state.journals = sortJournals(journals);
+    state.activeJournalId = state.journals[0].id;
+    ensureActiveEntry();
+    render();
+    selectEntry(getActiveEntries()[0]?.id);
+  } catch (error) {
+    setAuthStatus(`Supabase setup needed: ${error.message}`);
+    loadLocalData();
+  } finally {
+    state.loading = false;
+  }
+}
+
+async function fetchCloudJournals() {
+  const { data: journals, error: journalsError } = await db
+    .from("journals")
+    .select("*")
+    .order("updated_at", { ascending: false });
+
+  if (journalsError) throw journalsError;
+  if (!journals.length) return [];
+
+  const journalIds = journals.map((journal) => journal.id);
+  const { data: entries, error: entriesError } = await db
+    .from("entries")
+    .select("*")
+    .in("journal_id", journalIds)
+    .order("entry_date", { ascending: false });
+
+  if (entriesError) throw entriesError;
+
+  return journals.map((journal) => fromCloudJournal(journal, entries || []));
+}
+
+async function importLocalJournals(localJournals) {
+  const imported = [];
+
+  for (const journal of localJournals) {
+    await saveJournalToCloud(journal);
+    for (const entry of journal.entries) {
+      await saveEntryToCloud(journal, entry);
+    }
+    imported.push(journal);
+  }
+
+  return imported;
+}
+
+function renderAuth() {
+  const signedIn = Boolean(state.user);
+  els.accountPill.textContent = signedIn ? state.user.email : "Not signed in";
+  els.authStatus.textContent = state.authMessage || (signedIn
+    ? `Signed in as ${state.user.email}.`
+    : "Sign in to save journals across devices.");
+  els.signInButton.classList.toggle("hidden", signedIn);
+  els.signUpButton.classList.toggle("hidden", signedIn);
+  els.signOutButton.classList.toggle("hidden", !signedIn);
+  els.authEmail.classList.toggle("hidden", signedIn);
+  els.authPassword.classList.toggle("hidden", signedIn);
+}
+
+function setAuthStatus(message) {
+  state.authMessage = message;
+  els.authStatus.textContent = message;
 }
 
 function showSection(sectionName) {
@@ -107,19 +294,20 @@ function showSection(sectionName) {
   });
 }
 
-function createJournal() {
+async function createJournal() {
   const name = els.journalNameInput.value.trim() || `Journal ${state.journals.length + 1}`;
   const journal = createJournalRecord(name);
   state.journals.unshift(journal);
   state.activeJournalId = journal.id;
-  state.activeEntryId = createDraft(false).id;
+  const draft = await createDraft(false);
+  state.activeEntryId = draft.id;
   els.journalNameInput.value = "";
-  persist();
+  await persistJournal(journal);
   render();
   selectEntry(state.activeEntryId);
 }
 
-function deleteActiveJournal() {
+async function deleteActiveJournal() {
   const journal = getActiveJournal();
   if (!journal) return;
 
@@ -127,13 +315,20 @@ function deleteActiveJournal() {
   if (!confirmed) return;
 
   state.journals = state.journals.filter((item) => item.id !== journal.id);
+  if (state.user) {
+    await db.from("journals").delete().eq("id", journal.id);
+  }
+
   if (!state.journals.length) {
-    state.journals.push(createJournalRecord("Journal"));
+    const fallback = createJournalRecord("Journal");
+    state.journals.push(fallback);
+    await persistJournal(fallback);
+  } else {
+    persistLocal();
   }
 
   state.activeJournalId = state.journals[0].id;
   ensureActiveEntry();
-  persist();
   render();
   selectEntry(getActiveEntries()[0]?.id);
 }
@@ -165,18 +360,18 @@ function ensureActiveEntry() {
   if (!journal) return;
   if (!journal.entries.length) {
     journal.entries.unshift(makeEntry());
-    persist();
+    persistLocal();
   }
   state.activeEntryId = journal.entries[0].id;
 }
 
-function createDraft(userCreated = false) {
+async function createDraft(userCreated = false) {
   const journal = getActiveJournal();
   const draft = makeEntry();
   draft.userCreated = userCreated;
   journal.entries.unshift(draft);
   journal.updatedAt = draft.updatedAt;
-  persist();
+  await persistEntry(journal, draft);
   return draft;
 }
 
@@ -207,7 +402,7 @@ function selectEntry(id) {
   renderEntryList();
 }
 
-function saveActiveEntry() {
+async function saveActiveEntry() {
   const journal = getActiveJournal();
   const entry = getActiveEntries().find((item) => item.id === state.activeEntryId);
   if (!journal || !entry) return;
@@ -232,12 +427,13 @@ function saveActiveEntry() {
   journal.entries = sortEntries(journal.entries);
   journal.updatedAt = entry.updatedAt;
   state.journals = sortJournals(state.journals);
-  persist();
+  await persistJournal(journal);
+  await persistEntry(journal, entry);
   render();
   selectEntry(entry.id);
 }
 
-function deleteActiveEntry() {
+async function deleteActiveEntry() {
   const journal = getActiveJournal();
   const entry = getActiveEntries().find((item) => item.id === state.activeEntryId);
   if (!journal || !entry) return;
@@ -256,7 +452,8 @@ function deleteActiveEntry() {
     only.savedAt = null;
     only.userCreated = false;
     journal.updatedAt = only.updatedAt;
-    persist();
+    await persistJournal(journal);
+    await persistEntry(journal, only);
     render();
     selectEntry(only.id);
     return;
@@ -265,7 +462,13 @@ function deleteActiveEntry() {
   const index = journal.entries.findIndex((item) => item.id === state.activeEntryId);
   journal.entries = journal.entries.filter((item) => item.id !== state.activeEntryId);
   journal.updatedAt = new Date().toISOString();
-  persist();
+  if (state.user) {
+    await db.from("entries").delete().eq("id", entry.id);
+    await saveJournalToCloud(journal);
+  } else {
+    persistLocal();
+  }
+
   const next = journal.entries[Math.max(0, index - 1)] || journal.entries[0];
   state.activeEntryId = next.id;
   render();
@@ -311,7 +514,7 @@ function renderEntryList() {
   if (!matches.length) {
     const empty = document.createElement("p");
     empty.className = "empty-state";
-    empty.textContent = "No matching entries.";
+    empty.textContent = state.loading ? "Loading entries." : "No matching entries.";
     els.entryList.append(empty);
     return;
   }
@@ -346,7 +549,40 @@ function exportEntries() {
   URL.revokeObjectURL(url);
 }
 
-function loadJournals() {
+async function persistJournal(journal) {
+  if (state.user) {
+    await saveJournalToCloud(journal);
+  } else {
+    persistLocal();
+  }
+}
+
+async function persistEntry(journal, entry) {
+  if (state.user) {
+    await saveJournalToCloud(journal);
+    await saveEntryToCloud(journal, entry);
+  } else {
+    persistLocal();
+  }
+}
+
+function persistLocal() {
+  if (!state.user) {
+    localStorage.setItem(journalsKey, JSON.stringify(state.journals));
+  }
+}
+
+async function saveJournalToCloud(journal) {
+  const { error } = await db.from("journals").upsert(toCloudJournal(journal));
+  if (error) throw error;
+}
+
+async function saveEntryToCloud(journal, entry) {
+  const { error } = await db.from("entries").upsert(toCloudEntry(journal, entry));
+  if (error) throw error;
+}
+
+function loadLocalJournals() {
   try {
     const journals = JSON.parse(localStorage.getItem(journalsKey)) || [];
     if (journals.length) return sortJournals(journals.map(normalizeJournal));
@@ -389,8 +625,58 @@ function normalizeEntry(entry) {
   };
 }
 
-function persist() {
-  localStorage.setItem(journalsKey, JSON.stringify(state.journals));
+function fromCloudJournal(journal, entries) {
+  return {
+    id: journal.id,
+    name: journal.name || "Journal",
+    createdAt: journal.created_at,
+    updatedAt: journal.updated_at,
+    streak: journal.streak || 0,
+    lastStreakDate: journal.last_streak_date || "",
+    entries: sortEntries(entries.filter((entry) => entry.journal_id === journal.id).map(fromCloudEntry))
+  };
+}
+
+function fromCloudEntry(entry) {
+  return {
+    id: entry.id,
+    title: entry.title || "",
+    body: entry.body || "",
+    date: entry.entry_date || toInputDate(entry.updated_at || entry.created_at),
+    tags: entry.tags || [],
+    createdAt: entry.created_at,
+    updatedAt: entry.updated_at,
+    savedAt: entry.saved_at,
+    userCreated: Boolean(entry.user_created)
+  };
+}
+
+function toCloudJournal(journal) {
+  return {
+    id: journal.id,
+    user_id: state.user.id,
+    name: journal.name,
+    streak: journal.streak || 0,
+    last_streak_date: journal.lastStreakDate || null,
+    created_at: journal.createdAt,
+    updated_at: journal.updatedAt
+  };
+}
+
+function toCloudEntry(journal, entry) {
+  return {
+    id: entry.id,
+    journal_id: journal.id,
+    user_id: state.user.id,
+    title: entry.title,
+    body: entry.body,
+    entry_date: entry.date,
+    tags: entry.tags,
+    created_at: entry.createdAt,
+    updated_at: entry.updatedAt,
+    saved_at: entry.savedAt,
+    user_created: entry.userCreated
+  };
 }
 
 function getActiveJournal() {
