@@ -30,7 +30,7 @@ body {
 
 button,
 input,
-textarea {
+.writing-surface {
   font: inherit;
 }
 
@@ -404,8 +404,7 @@ h1 {
   background: transparent;
 }
 
-input::placeholder,
-textarea::placeholder {
+input::placeholder {
   color: var(--dim);
 }
 
@@ -507,10 +506,10 @@ textarea::placeholder {
   color-scheme: dark;
 }
 
-textarea {
+.writing-surface {
   flex: 1;
-  min-height: min(42vh, 460px);
-  resize: none;
+  min-height: min(58vh, 640px);
+  overflow: auto;
   padding: 12px 0 22px;
   color: var(--ink);
   border: 0;
@@ -523,7 +522,69 @@ textarea {
   line-height: 1.8;
 }
 
-textarea:focus,
+.writing-surface:empty::before {
+  color: var(--dim);
+  content: attr(data-placeholder);
+  pointer-events: none;
+}
+
+.writing-surface p,
+.writing-surface ul,
+.writing-surface ol,
+.writing-surface blockquote,
+.writing-surface h2,
+.writing-surface h3,
+.writing-surface h4 {
+  margin: 0 0 14px;
+}
+
+.writing-surface h2,
+.writing-surface h3,
+.writing-surface h4 {
+  font-weight: 400;
+  line-height: 1.08;
+}
+
+.writing-surface h2 {
+  font-size: 1.8rem;
+}
+
+.writing-surface h3 {
+  font-size: 1.45rem;
+}
+
+.writing-surface h4 {
+  font-size: 1.22rem;
+}
+
+.writing-surface ul,
+.writing-surface ol {
+  padding-left: 24px;
+}
+
+.writing-surface li + li {
+  margin-top: 6px;
+}
+
+.writing-surface blockquote {
+  padding-left: 16px;
+  color: var(--muted);
+  border-left: 1px solid var(--line-strong);
+}
+
+.writing-surface code {
+  padding: 1px 5px;
+  color: #fffaf0;
+  background: var(--panel-soft);
+}
+
+.writing-surface a {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.writing-surface:focus,
 .search-box:focus-within,
 .entry-fields label:focus-within {
   border-color: var(--line-strong);
@@ -534,72 +595,6 @@ textarea:focus,
   margin-top: -8px;
   color: var(--dim);
   font-size: 0.82rem;
-}
-
-.entry-preview {
-  min-height: 180px;
-  padding: 18px 0 0;
-  color: var(--ink);
-  border-top: 1px solid var(--line);
-  font-size: 1.08rem;
-  line-height: 1.7;
-}
-
-.entry-preview :first-child {
-  margin-top: 0;
-}
-
-.entry-preview p,
-.entry-preview ul,
-.entry-preview h2,
-.entry-preview h3,
-.entry-preview h4 {
-  margin: 0 0 14px;
-}
-
-.entry-preview h2,
-.entry-preview h3,
-.entry-preview h4 {
-  font-weight: 400;
-  line-height: 1.08;
-}
-
-.entry-preview h2 {
-  font-size: 1.8rem;
-}
-
-.entry-preview h3 {
-  font-size: 1.45rem;
-}
-
-.entry-preview h4 {
-  font-size: 1.22rem;
-}
-
-.entry-preview ul {
-  padding-left: 22px;
-}
-
-.entry-preview li + li {
-  margin-top: 6px;
-}
-
-.entry-preview strong {
-  color: #fffaf0;
-}
-
-.entry-preview em {
-  color: #ddd5c9;
-}
-
-.entry-preview a {
-  color: var(--ink);
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-
-.preview-empty {
-  color: var(--dim);
 }
 
 .ghost-button {
