@@ -19,6 +19,7 @@
           <button class="site-tab" type="button" data-section="letters">Letters</button>
           <button class="site-tab" type="button" data-section="reading">Reading</button>
         </nav>
+        <div class="account-pill" id="accountPill">Not signed in</div>
       </header>
 
       <section class="section-panel home-landing active" id="homeSection" aria-label="Home">
@@ -35,6 +36,21 @@
               unless you export it yourself.
             </p>
           </div>
+          <section class="auth-panel" aria-label="Account">
+            <div class="auth-panel__copy">
+              <span>Account</span>
+              <p id="authStatus">Sign in to save journals across devices.</p>
+            </div>
+            <form class="auth-form" id="authForm">
+              <input id="authEmail" type="email" placeholder="Email" autocomplete="email" aria-label="Email" />
+              <input id="authPassword" type="password" placeholder="Password" autocomplete="current-password" aria-label="Password" />
+              <div class="auth-actions">
+                <button class="primary-button" id="signInButton" type="button">Sign in</button>
+                <button class="ghost-button neutral" id="signUpButton" type="button">Sign up</button>
+                <button class="ghost-button neutral hidden" id="signOutButton" type="button">Sign out</button>
+              </div>
+            </form>
+          </section>
         </div>
       </section>
 
@@ -156,6 +172,7 @@
       </button>
     </template>
 
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="app.js"></script>
   </body>
 </html>
