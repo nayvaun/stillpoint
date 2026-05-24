@@ -7,6 +7,8 @@ const state = {
   activeEntryId: null
 };
 
+let editorMarkdownTimer;
+
 const els = {
   todayLabel: document.querySelector("#todayLabel"),
   homeButton: document.querySelector("#homeButton"),
@@ -36,7 +38,6 @@ const els = {
   entryTitle: document.querySelector("#entryTitle"),
   entryDate: document.querySelector("#entryDate"),
   entryBody: document.querySelector("#entryBody"),
-  entryPreview: document.querySelector("#entryPreview"),
   tagInput: document.querySelector("#tagInput"),
   deleteButton: document.querySelector("#deleteButton")
 };
@@ -95,7 +96,10 @@ function bindEvents() {
 
   els.deleteButton.addEventListener("click", deleteActiveEntry);
   els.searchInput.addEventListener("input", renderEntryList);
-  els.entryBody.addEventListener("input", updatePreview);
+  els.entryBody.addEventListener("beforeinput", handleEditorBeforeInput);
+  els.entryBody.addEventListener("input", handleEditorInput);
+  els.entryBody.addEventListener("keydown", handleEditorKeydown);
+  els.entryBody.addEventListener("paste", handleEditorPaste);
   els.exportButton.addEventListener("click", exportEntries);
 }
 
@@ -199,9 +203,8 @@ function selectEntry(id) {
   state.activeEntryId = id;
   els.entryTitle.value = entry.title;
   els.entryDate.value = entry.date || toInputDate(entry.updatedAt);
-  els.entryBody.value = entry.body;
+  setEditorContent(entry.body);
   els.tagInput.value = entry.tags.join(", ");
-  updatePreview();
   renderEntryList();
 }
 
@@ -210,9 +213,12 @@ function saveActiveEntry() {
   const entry = getActiveEntries().find((item) => item.id === state.activeEntryId);
   if (!journal || !entry) return;
 
+  clearTimeout(editorMarkdownTimer);
+  applyEditorMarkdown();
+
   entry.title = els.entryTitle.value.trim();
   entry.date = els.entryDate.value || toInputDate(new Date());
-  entry.body = els.entryBody.value.trim();
+  entry.body = getEditorContent();
   entry.tags = els.tagInput.value
     .split(",")
     .map((tag) => tag.trim())
@@ -290,7 +296,7 @@ function renderStats() {
 function renderEntryList() {
   const query = els.searchInput.value.trim().toLowerCase();
   const matches = getActiveEntries().filter((entry) => {
-    const haystack = [entry.title, entry.date, entry.body, ...entry.tags].join(" ").toLowerCase();
+    const haystack = [entry.title, entry.date, plainText(entry.body), ...entry.tags].join(" ").toLowerCase();
     return haystack.includes(query);
   });
 
@@ -321,7 +327,7 @@ function exportEntries() {
     .filter((entry) => entry.title || entry.body)
     .map((entry) => {
       const tags = entry.tags.length ? `Tags: ${entry.tags.join(", ")}\n` : "";
-      return `# ${entry.title || "Untitled entry"}\nDate: ${entry.date || ""}\n${tags}\n${entry.body}`;
+      return `# ${entry.title || "Untitled entry"}\nDate: ${entry.date || ""}\n${tags}\n${entryBodyToMarkdown(entry.body)}`;
     })
     .join("\n\n---\n\n");
 
@@ -397,7 +403,7 @@ function sortJournals(journals) {
 }
 
 function countWords(text) {
-  return text.trim().split(/\s+/).filter(Boolean).length;
+  return plainText(text).trim().split(/\s+/).filter(Boolean).length;
 }
 
 function getEntryMeta(entry) {
@@ -406,16 +412,228 @@ function getEntryMeta(entry) {
   return `${words} ${words === 1 ? "word" : "words"}${tags}`;
 }
 
-function updatePreview() {
-  const html = renderMarkup(els.entryBody.value);
-  els.entryPreview.innerHTML = html || "<p class=\"preview-empty\">Formatted preview</p>";
+function handleEditorBeforeInput(event) {
+  if (event.inputType === "formatBold") {
+    event.preventDefault();
+    document.execCommand("bold");
+  }
+
+  if (event.inputType === "formatItalic") {
+    event.preventDefault();
+    document.execCommand("italic");
+  }
+}
+
+function handleEditorInput(event) {
+  if (event.inputType === "insertText" && event.data === " ") {
+    applyBlockShortcut();
+  }
+
+  if (event.inputType === "insertText" && ["*", "`", ")"].includes(event.data)) {
+    applyInlineShortcut();
+  }
+
+  scheduleEditorMarkdown();
+}
+
+function handleEditorKeydown(event) {
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "b") {
+    event.preventDefault();
+    document.execCommand("bold");
+  }
+
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "i") {
+    event.preventDefault();
+    document.execCommand("italic");
+  }
+}
+
+function handleEditorPaste(event) {
+  event.preventDefault();
+  const text = event.clipboardData.getData("text/plain");
+  document.execCommand("insertText", false, text);
+  scheduleEditorMarkdown();
+}
+
+function scheduleEditorMarkdown() {
+  clearTimeout(editorMarkdownTimer);
+  editorMarkdownTimer = setTimeout(applyEditorMarkdown, 350);
+}
+
+function applyEditorMarkdown() {
+  const text = els.entryBody.innerText.replace(/\u00a0/g, " ").trim();
+  if (!text || !hasMarkdownSyntax(text)) return;
+
+  const html = sanitizeRichHtml(renderMarkup(text));
+  if (!html || html === els.entryBody.innerHTML) return;
+
+  els.entryBody.innerHTML = html;
+  moveCaretToEnd(els.entryBody);
+}
+
+function hasMarkdownSyntax(text) {
+  return /(^|\n)\s*(#{1,3}|[-*]|1\.|>)\s/.test(text) ||
+    /\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`|\[[^\]]+\]\(https?:\/\/[^)\s]+\)/.test(text);
+}
+
+function setEditorContent(content) {
+  const trimmed = (content || "").trim();
+  els.entryBody.innerHTML = looksLikeHtml(trimmed) ? sanitizeRichHtml(trimmed) : renderMarkup(trimmed);
+}
+
+function getEditorContent() {
+  return sanitizeRichHtml(els.entryBody.innerHTML).trim();
+}
+
+function applyBlockShortcut() {
+  const selection = window.getSelection();
+  if (!selection?.rangeCount || !selection.isCollapsed) return;
+
+  const block = getCurrentBlock(selection.anchorNode);
+  if (!block || block.closest("#entryBody") !== els.entryBody) return;
+
+  const text = block.textContent;
+  const heading = text.match(/^(#{1,3})\s$/);
+  const quote = text === "> ";
+  const unorderedList = text === "- " || text === "* ";
+  const orderedList = /^1\.\s$/.test(text);
+
+  if (!heading && !quote && !unorderedList && !orderedList) return;
+
+  block.textContent = "";
+
+  if (heading) {
+    document.execCommand("formatBlock", false, `h${heading[1].length + 1}`);
+  } else if (quote) {
+    document.execCommand("formatBlock", false, "blockquote");
+  } else if (unorderedList) {
+    document.execCommand("insertUnorderedList");
+  } else if (orderedList) {
+    document.execCommand("insertOrderedList");
+  }
+}
+
+function applyInlineShortcut() {
+  const selection = window.getSelection();
+  if (!selection?.rangeCount || !selection.isCollapsed) return;
+
+  const node = selection.anchorNode;
+  const offset = selection.anchorOffset;
+  if (!node || node.nodeType !== Node.TEXT_NODE) return;
+
+  const before = node.textContent.slice(0, offset);
+  const match =
+    before.match(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)$/) ||
+    before.match(/\*\*([^*]+)\*\*$/) ||
+    before.match(/`([^`]+)`$/) ||
+    before.match(/\*([^*]+)\*$/);
+
+  if (!match) return;
+
+  const syntax = match[0];
+  const range = document.createRange();
+  range.setStart(node, offset - syntax.length);
+  range.setEnd(node, offset);
+  range.deleteContents();
+
+  const replacement = createInlineReplacement(match, syntax);
+  range.insertNode(replacement);
+  moveCaretAfter(replacement);
+}
+
+function createInlineReplacement(match, syntax) {
+  if (syntax.startsWith("[")) {
+    const link = document.createElement("a");
+    link.href = match[2];
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = match[1];
+    return link;
+  }
+
+  const tagName = syntax.startsWith("**") ? "strong" : syntax.startsWith("`") ? "code" : "em";
+  const element = document.createElement(tagName);
+  element.textContent = match[1];
+  return element;
+}
+
+function getCurrentBlock(node) {
+  let current = node?.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+  while (current && current !== els.entryBody) {
+    if (/^(P|DIV|LI|H2|H3|H4|BLOCKQUOTE)$/.test(current.tagName)) return current;
+    current = current.parentElement;
+  }
+  return els.entryBody;
+}
+
+function moveCaretAfter(node) {
+  const range = document.createRange();
+  const selection = window.getSelection();
+  range.setStartAfter(node);
+  range.collapse(true);
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
+function moveCaretToEnd(node) {
+  const range = document.createRange();
+  const selection = window.getSelection();
+  range.selectNodeContents(node);
+  range.collapse(false);
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
+function entryBodyToMarkdown(body) {
+  if (!looksLikeHtml(body)) return body;
+
+  const template = document.createElement("template");
+  template.innerHTML = sanitizeRichHtml(body);
+  return [...template.content.childNodes].map(nodeToMarkdown).join("\n\n").trim();
+}
+
+function nodeToMarkdown(node) {
+  if (node.nodeType === Node.TEXT_NODE) return node.textContent.trim();
+  if (node.nodeType !== Node.ELEMENT_NODE) return "";
+
+  const text = [...node.childNodes].map(inlineNodeToMarkdown).join("").trim();
+  const tag = node.tagName.toLowerCase();
+
+  if (tag === "h2") return `# ${text}`;
+  if (tag === "h3") return `## ${text}`;
+  if (tag === "h4") return `### ${text}`;
+  if (tag === "blockquote") return text.split("\n").map((line) => `> ${line}`).join("\n");
+  if (tag === "ul") return [...node.children].map((item) => `- ${inlineNodeToMarkdown(item).trim()}`).join("\n");
+  if (tag === "ol") return [...node.children].map((item, index) => `${index + 1}. ${inlineNodeToMarkdown(item).trim()}`).join("\n");
+  if (tag === "br") return "\n";
+  return text;
+}
+
+function inlineNodeToMarkdown(node) {
+  if (node.nodeType === Node.TEXT_NODE) return node.textContent;
+  if (node.nodeType !== Node.ELEMENT_NODE) return "";
+
+  const text = [...node.childNodes].map(inlineNodeToMarkdown).join("");
+  const tag = node.tagName.toLowerCase();
+
+  if (tag === "strong" || tag === "b") return `**${text}**`;
+  if (tag === "em" || tag === "i") return `*${text}*`;
+  if (tag === "code") return `\`${text}\``;
+  if (tag === "a") return `[${text}](${node.getAttribute("href") || ""})`;
+  if (tag === "br") return "\n";
+  return text;
+}
+
+function looksLikeHtml(value) {
+  return /<\/?[a-z][\s\S]*>/i.test(value || "");
 }
 
 function renderMarkup(text) {
   const lines = text.replace(/\r\n/g, "\n").split("\n");
   const blocks = [];
   let paragraph = [];
-  let bullets = [];
+  let listItems = [];
+  let listTag = "ul";
 
   const flushParagraph = () => {
     if (!paragraph.length) return;
@@ -423,10 +641,10 @@ function renderMarkup(text) {
     paragraph = [];
   };
 
-  const flushBullets = () => {
-    if (!bullets.length) return;
-    blocks.push(`<ul>${bullets.map((item) => `<li>${formatInline(item)}</li>`).join("")}</ul>`);
-    bullets = [];
+  const flushList = () => {
+    if (!listItems.length) return;
+    blocks.push(`<${listTag}>${listItems.map((item) => `<li>${formatInline(item)}</li>`).join("")}</${listTag}>`);
+    listItems = [];
   };
 
   lines.forEach((line) => {
@@ -434,16 +652,18 @@ function renderMarkup(text) {
 
     if (!trimmed) {
       flushParagraph();
-      flushBullets();
+      flushList();
       return;
     }
 
     const heading = trimmed.match(/^(#{1,3})\s+(.+)$/);
-    const bullet = trimmed.match(/^-\s+(.+)$/);
+    const bullet = trimmed.match(/^[-*]\s+(.+)$/);
+    const numbered = trimmed.match(/^\d+\.\s+(.+)$/);
+    const quote = trimmed.match(/^>\s+(.+)$/);
 
     if (heading) {
       flushParagraph();
-      flushBullets();
+      flushList();
       const level = heading[1].length + 1;
       blocks.push(`<h${level}>${formatInline(heading[2])}</h${level}>`);
       return;
@@ -451,24 +671,87 @@ function renderMarkup(text) {
 
     if (bullet) {
       flushParagraph();
-      bullets.push(bullet[1]);
+      if (listTag !== "ul") flushList();
+      listTag = "ul";
+      listItems.push(bullet[1]);
       return;
     }
 
-    flushBullets();
+    if (numbered) {
+      flushParagraph();
+      if (listTag !== "ol") flushList();
+      listTag = "ol";
+      listItems.push(numbered[1]);
+      return;
+    }
+
+    if (quote) {
+      flushParagraph();
+      flushList();
+      blocks.push(`<blockquote>${formatInline(quote[1])}</blockquote>`);
+      return;
+    }
+
+    flushList();
     paragraph.push(trimmed);
   });
 
   flushParagraph();
-  flushBullets();
+  flushList();
   return blocks.join("");
 }
 
 function formatInline(value) {
   return escapeHtml(value)
     .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
     .replace(/\*([^*]+)\*/g, "<em>$1</em>");
+}
+
+function sanitizeRichHtml(html) {
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  const allowedTags = new Set(["A", "BLOCKQUOTE", "BR", "CODE", "DIV", "EM", "H2", "H3", "H4", "LI", "OL", "P", "STRONG", "UL"]);
+
+  const sanitizeNode = (node) => {
+    if (node.nodeType === Node.TEXT_NODE) return document.createTextNode(node.textContent);
+    if (node.nodeType !== Node.ELEMENT_NODE) return document.createTextNode("");
+
+    const tagName = node.tagName === "B" ? "STRONG" : node.tagName === "I" ? "EM" : node.tagName;
+    if (!allowedTags.has(tagName)) {
+      const fragment = document.createDocumentFragment();
+      node.childNodes.forEach((child) => fragment.append(sanitizeNode(child)));
+      return fragment;
+    }
+
+    const element = document.createElement(tagName.toLowerCase());
+    if (tagName === "A") {
+      const href = node.getAttribute("href") || "";
+      if (/^https?:\/\//.test(href)) {
+        element.href = href;
+        element.target = "_blank";
+        element.rel = "noopener noreferrer";
+      }
+    }
+
+    node.childNodes.forEach((child) => element.append(sanitizeNode(child)));
+    return element;
+  };
+
+  const fragment = document.createDocumentFragment();
+  template.content.childNodes.forEach((node) => fragment.append(sanitizeNode(node)));
+  const wrapper = document.createElement("div");
+  wrapper.append(fragment);
+  return wrapper.innerHTML;
+}
+
+function plainText(value) {
+  if (!looksLikeHtml(value)) return value || "";
+
+  return entryBodyToMarkdown(value)
+    .replace(/\[[^\]]+\]\((https?:\/\/[^)\s]+)\)/g, "$1")
+    .replace(/[#>*_`-]/g, " ");
 }
 
 function escapeHtml(value) {
