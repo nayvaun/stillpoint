@@ -7,8 +7,6 @@ const state = {
   activeEntryId: null
 };
 
-let editorMarkdownTimer;
-
 const els = {
   todayLabel: document.querySelector("#todayLabel"),
   homeButton: document.querySelector("#homeButton"),
@@ -28,7 +26,7 @@ const els = {
   journalTemplate: document.querySelector("#journalTemplate"),
   activeJournalName: document.querySelector("#activeJournalName"),
   entryCount: document.querySelector("#entryCount"),
-  wordCount: document.querySelector("#wordCount"),
+  streakCount: document.querySelector("#streakCount"),
   newEntryButton: document.querySelector("#newEntryButton"),
   exportButton: document.querySelector("#exportButton"),
   searchInput: document.querySelector("#searchInput"),
@@ -87,7 +85,7 @@ function bindEvents() {
   });
 
   els.newEntryButton.addEventListener("click", () => {
-    const draft = createDraft();
+    const draft = createDraft(true);
     state.activeEntryId = draft.id;
     render();
     selectEntry(draft.id);
@@ -96,10 +94,6 @@ function bindEvents() {
 
   els.deleteButton.addEventListener("click", deleteActiveEntry);
   els.searchInput.addEventListener("input", renderEntryList);
-  els.entryBody.addEventListener("beforeinput", handleEditorBeforeInput);
-  els.entryBody.addEventListener("input", handleEditorInput);
-  els.entryBody.addEventListener("keydown", handleEditorKeydown);
-  els.entryBody.addEventListener("paste", handleEditorPaste);
   els.exportButton.addEventListener("click", exportEntries);
 }
 
@@ -118,7 +112,7 @@ function createJournal() {
   const journal = createJournalRecord(name);
   state.journals.unshift(journal);
   state.activeJournalId = journal.id;
-  state.activeEntryId = createDraft().id;
+  state.activeEntryId = createDraft(false).id;
   els.journalNameInput.value = "";
   persist();
   render();
@@ -151,7 +145,9 @@ function createJournalRecord(name, entries = []) {
     name,
     entries: sortEntries(entries),
     createdAt: now,
-    updatedAt: now
+    updatedAt: now,
+    streak: 0,
+    lastStreakDate: ""
   };
 }
 
@@ -174,9 +170,10 @@ function ensureActiveEntry() {
   state.activeEntryId = journal.entries[0].id;
 }
 
-function createDraft() {
+function createDraft(userCreated = false) {
   const journal = getActiveJournal();
   const draft = makeEntry();
+  draft.userCreated = userCreated;
   journal.entries.unshift(draft);
   journal.updatedAt = draft.updatedAt;
   persist();
@@ -192,7 +189,9 @@ function makeEntry() {
     date: toInputDate(now),
     tags: [],
     createdAt: now,
-    updatedAt: now
+    updatedAt: now,
+    savedAt: null,
+    userCreated: false
   };
 }
 
@@ -203,7 +202,7 @@ function selectEntry(id) {
   state.activeEntryId = id;
   els.entryTitle.value = entry.title;
   els.entryDate.value = entry.date || toInputDate(entry.updatedAt);
-  setEditorContent(entry.body);
+  els.entryBody.value = entry.body;
   els.tagInput.value = entry.tags.join(", ");
   renderEntryList();
 }
@@ -213,17 +212,22 @@ function saveActiveEntry() {
   const entry = getActiveEntries().find((item) => item.id === state.activeEntryId);
   if (!journal || !entry) return;
 
-  clearTimeout(editorMarkdownTimer);
-  applyEditorMarkdown();
+  const shouldAdvanceStreak = !entry.savedAt && entry.userCreated;
 
   entry.title = els.entryTitle.value.trim();
   entry.date = els.entryDate.value || toInputDate(new Date());
-  entry.body = getEditorContent();
+  entry.body = els.entryBody.value.trim();
   entry.tags = els.tagInput.value
     .split(",")
     .map((tag) => tag.trim())
     .filter(Boolean);
   entry.updatedAt = new Date().toISOString();
+  entry.savedAt = entry.savedAt || entry.updatedAt;
+  entry.userCreated = false;
+
+  if (shouldAdvanceStreak) {
+    updateJournalStreak(journal, toInputDate(entry.updatedAt));
+  }
 
   journal.entries = sortEntries(journal.entries);
   journal.updatedAt = entry.updatedAt;
@@ -249,6 +253,8 @@ function deleteActiveEntry() {
     only.tags = [];
     only.date = toInputDate(new Date());
     only.updatedAt = new Date().toISOString();
+    only.savedAt = null;
+    only.userCreated = false;
     journal.updatedAt = only.updatedAt;
     persist();
     render();
@@ -290,13 +296,13 @@ function renderJournals() {
 function renderStats() {
   const savedEntries = getActiveEntries().filter((entry) => entry.title || entry.body);
   els.entryCount.textContent = savedEntries.length;
-  els.wordCount.textContent = savedEntries.reduce((sum, entry) => sum + countWords(entry.body), 0);
+  els.streakCount.textContent = getActiveJournal()?.streak || 0;
 }
 
 function renderEntryList() {
   const query = els.searchInput.value.trim().toLowerCase();
   const matches = getActiveEntries().filter((entry) => {
-    const haystack = [entry.title, entry.date, plainText(entry.body), ...entry.tags].join(" ").toLowerCase();
+    const haystack = [entry.title, entry.date, entry.body, ...entry.tags].join(" ").toLowerCase();
     return haystack.includes(query);
   });
 
@@ -327,15 +333,15 @@ function exportEntries() {
     .filter((entry) => entry.title || entry.body)
     .map((entry) => {
       const tags = entry.tags.length ? `Tags: ${entry.tags.join(", ")}\n` : "";
-      return `# ${entry.title || "Untitled entry"}\nDate: ${entry.date || ""}\n${tags}\n${entryBodyToMarkdown(entry.body)}`;
+      return `${entry.title || "Untitled entry"}\nDate: ${entry.date || ""}\n${tags}\n${entry.body}`;
     })
     .join("\n\n---\n\n");
 
-  const blob = new Blob([lines || journal.name], { type: "text/markdown" });
+  const blob = new Blob([lines || journal.name], { type: "text/plain" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `${slugify(journal.name)}.md`;
+  link.download = `${slugify(journal.name)}.txt`;
   link.click();
   URL.revokeObjectURL(url);
 }
@@ -362,7 +368,9 @@ function normalizeJournal(journal) {
     name: journal.name || "Journal",
     entries: sortEntries((journal.entries || []).map(normalizeEntry)),
     createdAt: journal.createdAt || new Date().toISOString(),
-    updatedAt: journal.updatedAt || journal.entries?.[0]?.updatedAt || new Date().toISOString()
+    updatedAt: journal.updatedAt || journal.entries?.[0]?.updatedAt || new Date().toISOString(),
+    streak: Number.isInteger(journal.streak) ? journal.streak : 0,
+    lastStreakDate: journal.lastStreakDate || ""
   };
 }
 
@@ -371,11 +379,13 @@ function normalizeEntry(entry) {
   return {
     id: entry.id || crypto.randomUUID(),
     title: entry.title || "",
-    body: entry.body || "",
+    body: stripHtml(entry.body || ""),
     date: entry.date || toInputDate(entry.updatedAt || entry.createdAt || now),
     tags: Array.isArray(entry.tags) ? entry.tags : [],
     createdAt: entry.createdAt || now,
-    updatedAt: entry.updatedAt || now
+    updatedAt: entry.updatedAt || now,
+    savedAt: entry.savedAt || (entry.title || entry.body ? entry.updatedAt || now : null),
+    userCreated: Boolean(entry.userCreated)
   };
 }
 
@@ -402,369 +412,34 @@ function sortJournals(journals) {
   return [...journals].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
 }
 
-function countWords(text) {
-  return plainText(text).trim().split(/\s+/).filter(Boolean).length;
-}
-
 function getEntryMeta(entry) {
-  const words = countWords(entry.body);
-  const tags = entry.tags.length ? ` - ${entry.tags.join(", ")}` : "";
-  return `${words} ${words === 1 ? "word" : "words"}${tags}`;
+  return entry.tags.join(", ");
 }
 
-function handleEditorBeforeInput(event) {
-  if (event.inputType === "formatBold") {
-    event.preventDefault();
-    document.execCommand("bold");
-  }
+function updateJournalStreak(journal, savedDate) {
+  if (journal.lastStreakDate === savedDate) return;
 
-  if (event.inputType === "formatItalic") {
-    event.preventDefault();
-    document.execCommand("italic");
-  }
+  const yesterday = offsetInputDate(savedDate, -1);
+  journal.streak = journal.lastStreakDate === yesterday ? (journal.streak || 0) + 1 : 1;
+  journal.lastStreakDate = savedDate;
 }
 
-function handleEditorInput(event) {
-  if (event.inputType === "insertText" && event.data === " ") {
-    applyBlockShortcut();
-  }
-
-  if (event.inputType === "insertText" && ["*", "`", ")"].includes(event.data)) {
-    applyInlineShortcut();
-  }
-
-  scheduleEditorMarkdown();
-}
-
-function handleEditorKeydown(event) {
-  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "b") {
-    event.preventDefault();
-    document.execCommand("bold");
-  }
-
-  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "i") {
-    event.preventDefault();
-    document.execCommand("italic");
-  }
-}
-
-function handleEditorPaste(event) {
-  event.preventDefault();
-  const text = event.clipboardData.getData("text/plain");
-  document.execCommand("insertText", false, text);
-  scheduleEditorMarkdown();
-}
-
-function scheduleEditorMarkdown() {
-  clearTimeout(editorMarkdownTimer);
-  editorMarkdownTimer = setTimeout(applyEditorMarkdown, 350);
-}
-
-function applyEditorMarkdown() {
-  const text = els.entryBody.innerText.replace(/\u00a0/g, " ").trim();
-  if (!text || !hasMarkdownSyntax(text)) return;
-
-  const html = sanitizeRichHtml(renderMarkup(text));
-  if (!html || html === els.entryBody.innerHTML) return;
-
-  els.entryBody.innerHTML = html;
-  moveCaretToEnd(els.entryBody);
-}
-
-function hasMarkdownSyntax(text) {
-  return /(^|\n)\s*(#{1,3}|[-*]|1\.|>)\s/.test(text) ||
-    /\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`|\[[^\]]+\]\(https?:\/\/[^)\s]+\)/.test(text);
-}
-
-function setEditorContent(content) {
-  const trimmed = (content || "").trim();
-  els.entryBody.innerHTML = looksLikeHtml(trimmed) ? sanitizeRichHtml(trimmed) : renderMarkup(trimmed);
-}
-
-function getEditorContent() {
-  return sanitizeRichHtml(els.entryBody.innerHTML).trim();
-}
-
-function applyBlockShortcut() {
-  const selection = window.getSelection();
-  if (!selection?.rangeCount || !selection.isCollapsed) return;
-
-  const block = getCurrentBlock(selection.anchorNode);
-  if (!block || block.closest("#entryBody") !== els.entryBody) return;
-
-  const text = block.textContent;
-  const heading = text.match(/^(#{1,3})\s$/);
-  const quote = text === "> ";
-  const unorderedList = text === "- " || text === "* ";
-  const orderedList = /^1\.\s$/.test(text);
-
-  if (!heading && !quote && !unorderedList && !orderedList) return;
-
-  block.textContent = "";
-
-  if (heading) {
-    document.execCommand("formatBlock", false, `h${heading[1].length + 1}`);
-  } else if (quote) {
-    document.execCommand("formatBlock", false, "blockquote");
-  } else if (unorderedList) {
-    document.execCommand("insertUnorderedList");
-  } else if (orderedList) {
-    document.execCommand("insertOrderedList");
-  }
-}
-
-function applyInlineShortcut() {
-  const selection = window.getSelection();
-  if (!selection?.rangeCount || !selection.isCollapsed) return;
-
-  const node = selection.anchorNode;
-  const offset = selection.anchorOffset;
-  if (!node || node.nodeType !== Node.TEXT_NODE) return;
-
-  const before = node.textContent.slice(0, offset);
-  const match =
-    before.match(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)$/) ||
-    before.match(/\*\*([^*]+)\*\*$/) ||
-    before.match(/`([^`]+)`$/) ||
-    before.match(/\*([^*]+)\*$/);
-
-  if (!match) return;
-
-  const syntax = match[0];
-  const range = document.createRange();
-  range.setStart(node, offset - syntax.length);
-  range.setEnd(node, offset);
-  range.deleteContents();
-
-  const replacement = createInlineReplacement(match, syntax);
-  range.insertNode(replacement);
-  moveCaretAfter(replacement);
-}
-
-function createInlineReplacement(match, syntax) {
-  if (syntax.startsWith("[")) {
-    const link = document.createElement("a");
-    link.href = match[2];
-    link.target = "_blank";
-    link.rel = "noopener noreferrer";
-    link.textContent = match[1];
-    return link;
-  }
-
-  const tagName = syntax.startsWith("**") ? "strong" : syntax.startsWith("`") ? "code" : "em";
-  const element = document.createElement(tagName);
-  element.textContent = match[1];
-  return element;
-}
-
-function getCurrentBlock(node) {
-  let current = node?.nodeType === Node.TEXT_NODE ? node.parentElement : node;
-  while (current && current !== els.entryBody) {
-    if (/^(P|DIV|LI|H2|H3|H4|BLOCKQUOTE)$/.test(current.tagName)) return current;
-    current = current.parentElement;
-  }
-  return els.entryBody;
-}
-
-function moveCaretAfter(node) {
-  const range = document.createRange();
-  const selection = window.getSelection();
-  range.setStartAfter(node);
-  range.collapse(true);
-  selection.removeAllRanges();
-  selection.addRange(range);
-}
-
-function moveCaretToEnd(node) {
-  const range = document.createRange();
-  const selection = window.getSelection();
-  range.selectNodeContents(node);
-  range.collapse(false);
-  selection.removeAllRanges();
-  selection.addRange(range);
-}
-
-function entryBodyToMarkdown(body) {
-  if (!looksLikeHtml(body)) return body;
+function stripHtml(value) {
+  if (!/<\/?[a-z][\s\S]*>/i.test(value || "")) return value || "";
 
   const template = document.createElement("template");
-  template.innerHTML = sanitizeRichHtml(body);
-  return [...template.content.childNodes].map(nodeToMarkdown).join("\n\n").trim();
-}
-
-function nodeToMarkdown(node) {
-  if (node.nodeType === Node.TEXT_NODE) return node.textContent.trim();
-  if (node.nodeType !== Node.ELEMENT_NODE) return "";
-
-  const text = [...node.childNodes].map(inlineNodeToMarkdown).join("").trim();
-  const tag = node.tagName.toLowerCase();
-
-  if (tag === "h2") return `# ${text}`;
-  if (tag === "h3") return `## ${text}`;
-  if (tag === "h4") return `### ${text}`;
-  if (tag === "blockquote") return text.split("\n").map((line) => `> ${line}`).join("\n");
-  if (tag === "ul") return [...node.children].map((item) => `- ${inlineNodeToMarkdown(item).trim()}`).join("\n");
-  if (tag === "ol") return [...node.children].map((item, index) => `${index + 1}. ${inlineNodeToMarkdown(item).trim()}`).join("\n");
-  if (tag === "br") return "\n";
-  return text;
-}
-
-function inlineNodeToMarkdown(node) {
-  if (node.nodeType === Node.TEXT_NODE) return node.textContent;
-  if (node.nodeType !== Node.ELEMENT_NODE) return "";
-
-  const text = [...node.childNodes].map(inlineNodeToMarkdown).join("");
-  const tag = node.tagName.toLowerCase();
-
-  if (tag === "strong" || tag === "b") return `**${text}**`;
-  if (tag === "em" || tag === "i") return `*${text}*`;
-  if (tag === "code") return `\`${text}\``;
-  if (tag === "a") return `[${text}](${node.getAttribute("href") || ""})`;
-  if (tag === "br") return "\n";
-  return text;
-}
-
-function looksLikeHtml(value) {
-  return /<\/?[a-z][\s\S]*>/i.test(value || "");
-}
-
-function renderMarkup(text) {
-  const lines = text.replace(/\r\n/g, "\n").split("\n");
-  const blocks = [];
-  let paragraph = [];
-  let listItems = [];
-  let listTag = "ul";
-
-  const flushParagraph = () => {
-    if (!paragraph.length) return;
-    blocks.push(`<p>${formatInline(paragraph.join(" "))}</p>`);
-    paragraph = [];
-  };
-
-  const flushList = () => {
-    if (!listItems.length) return;
-    blocks.push(`<${listTag}>${listItems.map((item) => `<li>${formatInline(item)}</li>`).join("")}</${listTag}>`);
-    listItems = [];
-  };
-
-  lines.forEach((line) => {
-    const trimmed = line.trim();
-
-    if (!trimmed) {
-      flushParagraph();
-      flushList();
-      return;
-    }
-
-    const heading = trimmed.match(/^(#{1,3})\s+(.+)$/);
-    const bullet = trimmed.match(/^[-*]\s+(.+)$/);
-    const numbered = trimmed.match(/^\d+\.\s+(.+)$/);
-    const quote = trimmed.match(/^>\s+(.+)$/);
-
-    if (heading) {
-      flushParagraph();
-      flushList();
-      const level = heading[1].length + 1;
-      blocks.push(`<h${level}>${formatInline(heading[2])}</h${level}>`);
-      return;
-    }
-
-    if (bullet) {
-      flushParagraph();
-      if (listTag !== "ul") flushList();
-      listTag = "ul";
-      listItems.push(bullet[1]);
-      return;
-    }
-
-    if (numbered) {
-      flushParagraph();
-      if (listTag !== "ol") flushList();
-      listTag = "ol";
-      listItems.push(numbered[1]);
-      return;
-    }
-
-    if (quote) {
-      flushParagraph();
-      flushList();
-      blocks.push(`<blockquote>${formatInline(quote[1])}</blockquote>`);
-      return;
-    }
-
-    flushList();
-    paragraph.push(trimmed);
-  });
-
-  flushParagraph();
-  flushList();
-  return blocks.join("");
-}
-
-function formatInline(value) {
-  return escapeHtml(value)
-    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
-    .replace(/`([^`]+)`/g, "<code>$1</code>")
-    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-    .replace(/\*([^*]+)\*/g, "<em>$1</em>");
-}
-
-function sanitizeRichHtml(html) {
-  const template = document.createElement("template");
-  template.innerHTML = html;
-  const allowedTags = new Set(["A", "BLOCKQUOTE", "BR", "CODE", "DIV", "EM", "H2", "H3", "H4", "LI", "OL", "P", "STRONG", "UL"]);
-
-  const sanitizeNode = (node) => {
-    if (node.nodeType === Node.TEXT_NODE) return document.createTextNode(node.textContent);
-    if (node.nodeType !== Node.ELEMENT_NODE) return document.createTextNode("");
-
-    const tagName = node.tagName === "B" ? "STRONG" : node.tagName === "I" ? "EM" : node.tagName;
-    if (!allowedTags.has(tagName)) {
-      const fragment = document.createDocumentFragment();
-      node.childNodes.forEach((child) => fragment.append(sanitizeNode(child)));
-      return fragment;
-    }
-
-    const element = document.createElement(tagName.toLowerCase());
-    if (tagName === "A") {
-      const href = node.getAttribute("href") || "";
-      if (/^https?:\/\//.test(href)) {
-        element.href = href;
-        element.target = "_blank";
-        element.rel = "noopener noreferrer";
-      }
-    }
-
-    node.childNodes.forEach((child) => element.append(sanitizeNode(child)));
-    return element;
-  };
-
-  const fragment = document.createDocumentFragment();
-  template.content.childNodes.forEach((node) => fragment.append(sanitizeNode(node)));
-  const wrapper = document.createElement("div");
-  wrapper.append(fragment);
-  return wrapper.innerHTML;
-}
-
-function plainText(value) {
-  if (!looksLikeHtml(value)) return value || "";
-
-  return entryBodyToMarkdown(value)
-    .replace(/\[[^\]]+\]\((https?:\/\/[^)\s]+)\)/g, "$1")
-    .replace(/[#>*_`-]/g, " ");
-}
-
-function escapeHtml(value) {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
+  template.innerHTML = value;
+  return template.content.textContent || "";
 }
 
 function toInputDate(date) {
   return new Date(date).toISOString().slice(0, 10);
+}
+
+function offsetInputDate(date, days) {
+  const value = new Date(`${date}T00:00:00`);
+  value.setDate(value.getDate() + days);
+  return toInputDate(value);
 }
 
 function formatInputDate(date) {
