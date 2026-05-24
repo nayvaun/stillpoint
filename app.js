@@ -27,6 +27,7 @@ const els = {
   },
   accountPill: document.querySelector("#accountPill"),
   authStatus: document.querySelector("#authStatus"),
+  authForm: document.querySelector("#authForm"),
   authUsername: document.querySelector("#authUsername"),
   authPassword: document.querySelector("#authPassword"),
   signInButton: document.querySelector("#signInButton"),
@@ -92,6 +93,10 @@ function bindEvents() {
   els.signInButton.addEventListener("click", signIn);
   els.signUpButton.addEventListener("click", signUp);
   els.signOutButton.addEventListener("click", signOut);
+  els.authForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    await signIn();
+  });
 
   els.newJournalButton.addEventListener("click", () => {
     els.journalNameInput.focus();
@@ -138,7 +143,7 @@ async function signIn() {
     return;
   }
 
-  els.authPassword.value = "";
+  clearPassword();
 }
 
 async function signUp() {
@@ -157,7 +162,7 @@ async function signUp() {
     return;
   }
 
-  els.authPassword.value = "";
+  clearPassword();
   if (!data.session) {
     setAuthStatus("Account created. If sign in does not work yet, turn off email confirmations in Supabase.");
   }
@@ -251,7 +256,8 @@ async function fetchCloudJournals() {
 
   if (entriesError) throw entriesError;
 
-  return journals.map((journal) => fromCloudJournal(journal, entries || []));
+  const entriesByJournal = groupEntriesByJournal(entries || []);
+  return journals.map((journal) => fromCloudJournal(journal, entriesByJournal.get(journal.id) || []));
 }
 
 async function importLocalJournals(localJournals) {
@@ -259,9 +265,7 @@ async function importLocalJournals(localJournals) {
 
   for (const journal of localJournals) {
     await saveJournalToCloud(journal);
-    for (const entry of journal.entries) {
-      await saveEntryToCloud(journal, entry);
-    }
+    await Promise.all(journal.entries.map((entry) => saveEntryToCloud(journal, entry)));
     imported.push(journal);
   }
 
@@ -305,7 +309,6 @@ async function createJournal() {
   const draft = await createDraft(false);
   state.activeEntryId = draft.id;
   els.journalNameInput.value = "";
-  await persistJournal(journal);
   render();
   selectEntry(state.activeEntryId);
 }
@@ -430,7 +433,6 @@ async function saveActiveEntry() {
   journal.entries = sortEntries(journal.entries);
   journal.updatedAt = entry.updatedAt;
   state.journals = sortJournals(state.journals);
-  await persistJournal(journal);
   await persistEntry(journal, entry);
   render();
   selectEntry(entry.id);
@@ -455,7 +457,6 @@ async function deleteActiveEntry() {
     only.savedAt = null;
     only.userCreated = false;
     journal.updatedAt = only.updatedAt;
-    await persistJournal(journal);
     await persistEntry(journal, only);
     render();
     selectEntry(only.id);
@@ -488,7 +489,7 @@ function renderJournals() {
   els.journalList.replaceChildren();
   state.journals.forEach((journal) => {
     const card = els.journalTemplate.content.firstElementChild.cloneNode(true);
-    const savedEntries = journal.entries.filter((entry) => entry.title || entry.body);
+    const savedEntries = getSavedEntries(journal);
     card.classList.toggle("active", journal.id === state.activeJournalId);
     card.querySelector("strong").textContent = journal.name;
     card.querySelector("span").textContent = `${savedEntries.length} ${savedEntries.length === 1 ? "entry" : "entries"}`;
@@ -500,7 +501,7 @@ function renderJournals() {
 }
 
 function renderStats() {
-  const savedEntries = getActiveEntries().filter((entry) => entry.title || entry.body);
+  const savedEntries = getSavedEntries(getActiveJournal());
   els.entryCount.textContent = savedEntries.length;
   els.streakCount.textContent = getActiveJournal()?.streak || 0;
 }
@@ -535,8 +536,9 @@ function renderEntryList() {
 
 function exportEntries() {
   const journal = getActiveJournal();
-  const lines = getActiveEntries()
-    .filter((entry) => entry.title || entry.body)
+  if (!journal) return;
+
+  const lines = getSavedEntries(journal)
     .map((entry) => {
       const tags = entry.tags.length ? `Tags: ${entry.tags.join(", ")}\n` : "";
       return `${entry.title || "Untitled entry"}\nDate: ${entry.date || ""}\n${tags}\n${entry.body}`;
@@ -628,7 +630,7 @@ function normalizeEntry(entry) {
   };
 }
 
-function fromCloudJournal(journal, entries) {
+function fromCloudJournal(journal, entries = []) {
   return {
     id: journal.id,
     name: journal.name || "Journal",
@@ -636,7 +638,7 @@ function fromCloudJournal(journal, entries) {
     updatedAt: journal.updated_at,
     streak: journal.streak || 0,
     lastStreakDate: journal.last_streak_date || "",
-    entries: sortEntries(entries.filter((entry) => entry.journal_id === journal.id).map(fromCloudEntry))
+    entries: sortEntries(entries.map(fromCloudEntry))
   };
 }
 
@@ -690,6 +692,19 @@ function getActiveEntries() {
   return getActiveJournal()?.entries || [];
 }
 
+function getSavedEntries(journal) {
+  return (journal?.entries || []).filter((entry) => entry.title || entry.body);
+}
+
+function groupEntriesByJournal(entries) {
+  return entries.reduce((groups, entry) => {
+    const group = groups.get(entry.journal_id) || [];
+    group.push(entry);
+    groups.set(entry.journal_id, group);
+    return groups;
+  }, new Map());
+}
+
 function sortEntries(entries) {
   return [...entries].sort((a, b) => {
     const dateDiff = new Date(b.date || b.updatedAt) - new Date(a.date || a.updatedAt);
@@ -734,6 +749,10 @@ function usernameToEmail(username) {
 
 function emailToUsername(email) {
   return (email || "").split("@")[0] || "account";
+}
+
+function clearPassword() {
+  els.authPassword.value = "";
 }
 
 function toInputDate(date) {
