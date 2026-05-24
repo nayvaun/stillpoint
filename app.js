@@ -27,7 +27,7 @@ const els = {
   },
   accountPill: document.querySelector("#accountPill"),
   authStatus: document.querySelector("#authStatus"),
-  authEmail: document.querySelector("#authEmail"),
+  authUsername: document.querySelector("#authUsername"),
   authPassword: document.querySelector("#authPassword"),
   signInButton: document.querySelector("#signInButton"),
   signUpButton: document.querySelector("#signUpButton"),
@@ -123,14 +123,15 @@ function bindEvents() {
 }
 
 async function signIn() {
-  const email = els.authEmail.value.trim();
+  const username = normalizeUsername(els.authUsername.value);
   const password = els.authPassword.value;
-  if (!email || !password) {
-    setAuthStatus("Enter your email and password first.");
+  if (!username || !password) {
+    setAuthStatus("Enter your username and password first.");
     return;
   }
 
   setAuthStatus("Signing in...");
+  const email = usernameToEmail(username);
   const { error } = await db.auth.signInWithPassword({ email, password });
   if (error) {
     setAuthStatus(error.message);
@@ -141,14 +142,15 @@ async function signIn() {
 }
 
 async function signUp() {
-  const email = els.authEmail.value.trim();
+  const username = normalizeUsername(els.authUsername.value);
   const password = els.authPassword.value;
-  if (!email || !password) {
-    setAuthStatus("Enter an email and password to sign up.");
+  if (!username || !password) {
+    setAuthStatus("Enter a username and password to sign up.");
     return;
   }
 
   setAuthStatus("Creating account...");
+  const email = usernameToEmail(username);
   const { data, error } = await db.auth.signUp({ email, password });
   if (error) {
     setAuthStatus(error.message);
@@ -157,7 +159,7 @@ async function signUp() {
 
   els.authPassword.value = "";
   if (!data.session) {
-    setAuthStatus("Check your email to confirm your account.");
+    setAuthStatus("Account created. If sign in does not work yet, turn off email confirmations in Supabase.");
   }
 }
 
@@ -268,14 +270,15 @@ async function importLocalJournals(localJournals) {
 
 function renderAuth() {
   const signedIn = Boolean(state.user);
-  els.accountPill.textContent = signedIn ? state.user.email : "Not signed in";
+  const username = signedIn ? emailToUsername(state.user.email) : "";
+  els.accountPill.textContent = signedIn ? username : "Not signed in";
   els.authStatus.textContent = state.authMessage || (signedIn
-    ? `Signed in as ${state.user.email}.`
-    : "Sign in to save journals across devices.");
+    ? `Signed in as ${username}.`
+    : "Sign in with a username to save journals across devices.");
   els.signInButton.classList.toggle("hidden", signedIn);
   els.signUpButton.classList.toggle("hidden", signedIn);
   els.signOutButton.classList.toggle("hidden", !signedIn);
-  els.authEmail.classList.toggle("hidden", signedIn);
+  els.authUsername.classList.toggle("hidden", signedIn);
   els.authPassword.classList.toggle("hidden", signedIn);
 }
 
@@ -716,6 +719,21 @@ function stripHtml(value) {
   const template = document.createElement("template");
   template.innerHTML = value;
   return template.content.textContent || "";
+}
+
+function normalizeUsername(value) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, "");
+}
+
+function usernameToEmail(username) {
+  return `${username}@stillpoint.local`;
+}
+
+function emailToUsername(email) {
+  return (email || "").split("@")[0] || "account";
 }
 
 function toInputDate(date) {
